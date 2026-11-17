@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from playwright.sync_api import sync_playwright
@@ -28,30 +29,47 @@ def main():
         
         try:
             print(f"Accessing URL: {TARGET_URL}")
-            page.goto(TARGET_URL, wait_until="networkidle", timeout=60000)
-            page.wait_for_timeout(5000)
-            
-            # ページ内の商品カード（または商品名が含まれそうな要素）を広く探す
-            # プレバンの商品名やリンクになりそうなアンカータグをすべて抽出
-            links = page.locator('a[href*="/item/"]').all()
-            print(f"Found {len(links)} links containing '/item/'")
+            page.goto(TARGET_URL, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(3000)
 
-            for i, link in enumerate(links[:15]): # 最初の15件をログに出力して中身を確認
-                href = link.get_attribute("href")
-                text = link.inner_text().strip()
-                print(f"--- Link {i+1} ---")
-                print(f"HREF: {href}")
-                print(f"TEXT:\n{text}\n")
+            # ページ内のJavaScriptから const ga_items = [...] の部分を抽出しに行く
+            # または、ページ上で ga_items 変数を直接評価して取得する
+            ga_items = page.evaluate("typeof ga_items !== 'undefined' ? ga_items : []")
+            
+            print(f"Found {len(ga_items)} items from ga_items variable.")
+
+            # 上位10件を抽出
+            for item in ga_items[:10]:
+                # item_name には "1000261242_RE/100 1/100 ガンダムＭｋ-III..." のようにコードが含まれるため、見やすく調整可能
+                raw_name = item.get("item_name", "")
+                # 先頭のプレフィックス（例: "1000261242_"）を取り除いてスッキリさせる
+                clean_name = re.sub(r'^\d+_', '', raw_name)
+                
+                price_val = item.get("price", "")
+                price_str = f"¥{int(price_val):,}" if price_val.isdigit() else price_val
+                
+                # item_category5 に商品URLが入っている
+                url = item.get("item_category5", "")
+
+                scraped_data.append({
+                    "title": clean_name,
+                    "price": price_str,
+                    "url": url,
+                    "date": now_str
+                })
 
         except Exception as e:
-            print(f"Error during scraping: {e}")
+            print(f"Error during extraction: {e}")
         finally:
             browser.close()
 
+    # data/data.json に保存
     output_dir = Path("data")
     output_dir.mkdir(exist_ok=True)
     with open(output_dir / "data.json", "w", encoding="utf-8") as f:
         json.dump(scraped_data, f, ensure_ascii=False, indent=2)
+    
+    print(f"Successfully saved {len(scraped_data)} items to data.json")
 
 if __name__ == "__main__":
     main()
