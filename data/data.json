@@ -1,3 +1,12 @@
 [
-  {"title": "初期データです", "url": "https://example.com", "date": "2026-06-07"}
+  {
+    "title": "はじめての自動収集記事 1",
+    "url": "https://example.com/1",
+    "date": "2026-06-07"
+  },
+  {
+    "title": "はじめての自動収集記事 2",
+    "url": "https://example.com/2",
+    "date": "2026-06-07"
+  }
 ]
