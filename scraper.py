@@ -27,51 +27,38 @@ def main():
         )
         page = context.new_page()
         
-        captured_html = ""
-
-        # レスポンスを監視し、目的のURLからのXHRレスポンス（HTML）をキャッチする
-        def handle_response(response):
-            nonlocal captured_html
-            if "/chara/c0010" in response.url and response.request.resource_type in ["document", "fetch", "xhr"]:
-                text = response.text()
-                if "ga_items" in text:  # ga_itemsが含まれているレスポンスを狙う
-                    captured_html = text
-
-        page.on("response", handle_response)
-        
         try:
             print(f"Accessing URL: {TARGET_URL}")
+            # ページにアクセスし、しっかりと読み込みを待つ
             page.goto(TARGET_URL, wait_until="networkidle", timeout=60000)
-            page.wait_for_timeout(5000) # 非同期の通信完了を少し待つ
+            page.wait_for_timeout(5000)
 
-            # もしイベントでキャッチできていなければ、現在のページのコンテンツを取得
-            if not captured_html:
-                captured_html = page.content()
+            # ページのHTMLソース全体を取得
+            html_content = page.content()
 
-            # キャッチしたHTMLテキストの中から const ga_items = [...] の配列部分を正規表現で抜き出す
-            match = re.search(r'const\s+ga_items\s*=\s*(\[.*?\]);', captured_html, re.DOTALL)
+            # HTMLの中から const ga_items = [...] の配列部分を正規表現で抽出
+            match = re.search(r'const\s+ga_items\s*=\s*(\[.*?\]);', html_content, re.DOTALL)
             
             if match:
                 ga_items_str = match.group(1)
-                # JavaScriptの配列文字列をPythonのリストに変換（シングルクォートやエスケープの調整が必要な場合があるため安全に処理）
-                # プレバンの出力はダブルクォートの標準的なJSONに近い形なのでそのままパースを試みる
                 try:
                     ga_items = json.loads(ga_items_str)
                 except Exception:
-                    # うまくいかない場合は簡易的に評価
                     import ast
                     ga_items = ast.literal_eval(ga_items_str.replace('null', 'None').replace('true', 'True').replace('false', 'False'))
                 
-                print(f"Successfully extracted {len(ga_items)} items from captured data.")
+                print(f"Successfully extracted {len(ga_items)} items from page source.")
 
                 # 上位10件を抽出
                 for item in ga_items[:10]:
                     raw_name = item.get("item_name", "")
+                    # 先頭のIDプレフィックスを除去
                     clean_name = re.sub(r'^\d+_', '', raw_name)
                     
                     price_val = item.get("price", "")
                     price_str = f"¥{int(price_val):,}" if str(price_val).isdigit() else price_val
                     
+                    # URLを取得
                     url = item.get("item_category5", "")
 
                     scraped_data.append({
@@ -81,7 +68,7 @@ def main():
                         "date": now_str
                     })
             else:
-                print("Could not find ga_items in the captured response.")
+                print("Could not find ga_items in the page content.")
 
         except Exception as e:
             print(f"Error during extraction: {e}")
