@@ -11,7 +11,6 @@ def main():
     now_str = datetime.now(jst).strftime('%Y-%m-%d %H:%M')
 
     with sync_playwright() as p:
-        # ヘッドレスモードをオフ（または自動検知対策を強めたコンテキスト）で起動
         browser = p.chromium.launch(
             headless=True,
             args=[
@@ -20,32 +19,26 @@ def main():
                 "--disable-setuid-sandbox"
             ]
         )
-        
-        # 一般的なPCブラウザに見せかける設定
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             viewport={"width": 1280, "height": 800},
             locale="ja-JP"
         )
-        
         page = context.new_page()
         
         try:
-            # ページにアクセス
+            print(f"Accessing URL: {TARGET_URL}")
             page.goto(TARGET_URL, wait_until="domcontentloaded", timeout=60000)
-            
-            # 人間のように少し待機し、スクロール動作を入れる
             page.wait_for_timeout(5000)
-            page.mouse.wheel(0, 500)
-            page.wait_for_timeout(2000)
 
-            # 商品リンクを取得
-            links = page.locator('a[href*="/item/item-"]').all()
-            
+            # ページ内のすべてのリンクをチェックしてログに出力
+            links = page.locator("a").all()
+            print(f"Total links found: {len(links)}")
+
             seen_urls = set()
             for link in links:
                 href = link.get_attribute("href")
-                if not href:
+                if not href or "/item/item-" not in href:
                     continue
                 
                 full_url = f"https://p-bandai.jp{href}" if href.startswith("/") else href
@@ -76,12 +69,14 @@ def main():
 
                 if len(scraped_data) >= 10:
                     break
+            
+            print(f"Successfully scraped items count: {len(scraped_data)}")
+
         except Exception as e:
             print(f"Error during scraping: {e}")
         finally:
             browser.close()
 
-    # 取得できた場合のみ（または空でも）保存
     output_dir = Path("data")
     output_dir.mkdir(exist_ok=True)
     with open(output_dir / "data.json", "w", encoding="utf-8") as f:
