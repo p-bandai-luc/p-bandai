@@ -18,13 +18,15 @@ def main():
         return
 
     # ScraperAPI経由でリクエストを送る（render=trueを指定してJSをレンダリングさせる）
+    # ScraperAPI経由でリクエストを送るパラメータを調整
     payload = {
         'api_key': api_key,
         'url': TARGET_URL,
         'render': 'true',
-        'country_code': 'jp' # 日本のIPを指定
-    }
-    
+        'country_code': 'jp',
+        'premium_proxy': 'true',  # 高度なプロキシ（ブロック回避力を上げる）
+        'device_type': 'desktop'
+    }    
     print("Requesting via ScraperAPI...")
     response = requests.get('https://api.scraperapi.com/', params=payload, timeout=90)
     
