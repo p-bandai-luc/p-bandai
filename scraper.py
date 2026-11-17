@@ -7,68 +7,81 @@ TARGET_URL = "https://p-bandai.jp/chara/c0010/?q=&q2=&C1=c0010&C2=S0004&C3=&C4=&
 
 def main():
     scraped_data = []
-    # 日本時間の現在時刻を取得
     jst = timezone(timedelta(hours=+9), 'JST')
     now_str = datetime.now(jst).strftime('%Y-%m-%d %H:%M')
 
     with sync_playwright() as p:
-        # ブラウザを起動
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        # ヘッドレスモードをオフ（または自動検知対策を強めたコンテキスト）で起動
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-setuid-sandbox"
+            ]
         )
+        
+        # 一般的なPCブラウザに見せかける設定
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 800},
+            locale="ja-JP"
+        )
+        
         page = context.new_page()
         
-        # ページにアクセスし、ネットワークが落ち着くまで待機
-        page.goto(TARGET_URL, wait_until="networkidle", timeout=60000)
-        page.wait_for_timeout(3000) # 念のため3秒待機
-
-        # 商品詳細ページ（/item/item-）へのリンク要素を取得
-        links = page.locator('a[href*="/item/item-"]').all()
-        
-        seen_urls = set()
-        for link in links:
-            href = link.get_attribute("href")
-            if not href:
-                continue
+        try:
+            # ページにアクセス
+            page.goto(TARGET_URL, wait_until="domcontentloaded", timeout=60000)
             
-            # 相対パスの場合はフルURLに変換
-            full_url = f"https://p-bandai.jp{href}" if href.startswith("/") else href
-            # クエリパラメータ（?rt=など）を除去して重複判定を統一
-            clean_url = full_url.split("?")[0]
-            
-            if clean_url in seen_urls:
-                continue
+            # 人間のように少し待機し、スクロール動作を入れる
+            page.wait_for_timeout(5000)
+            page.mouse.wheel(0, 500)
+            page.wait_for_timeout(2000)
 
-            # リンク内のテキスト（商品名や価格など）を取得
-            text = link.inner_text().strip()
-            # 画像だけの空リンクなどを除外し、商品名があるものを抽出
-            lines = [line.strip() for line in text.split("\n") if line.strip()]
-            if not lines:
-                continue
+            # 商品リンクを取得
+            links = page.locator('a[href*="/item/item-"]').all()
+            
+            seen_urls = set()
+            for link in links:
+                href = link.get_attribute("href")
+                if not href:
+                    continue
                 
-            title = lines[0]
-            price = ""
-            for line in lines:
-                if "円" in line or "￥" in line or "¥" in line:
-                    price = line
+                full_url = f"https://p-bandai.jp{href}" if href.startswith("/") else href
+                clean_url = full_url.split("?")[0]
+                
+                if clean_url in seen_urls:
+                    continue
+
+                text = link.inner_text().strip()
+                lines = [line.strip() for line in text.split("\n") if line.strip()]
+                if not lines:
+                    continue
+                    
+                title = lines[0]
+                price = ""
+                for line in lines:
+                    if "円" in line or "￥" in line or "¥" in line:
+                        price = line
+                        break
+
+                seen_urls.add(clean_url)
+                scraped_data.append({
+                    "title": title,
+                    "price": price,
+                    "url": clean_url,
+                    "date": now_str
+                })
+
+                if len(scraped_data) >= 10:
                     break
+        except Exception as e:
+            print(f"Error during scraping: {e}")
+        finally:
+            browser.close()
 
-            seen_urls.add(clean_url)
-            scraped_data.append({
-                "title": title,
-                "price": price,
-                "url": clean_url,
-                "date": now_str
-            })
-
-            # 10件集まったらループ終了
-            if len(scraped_data) >= 10:
-                break
-
-        browser.close()
-
-    # data/data.json に保存
+    # 取得できた場合のみ（または空でも）保存
     output_dir = Path("data")
     output_dir.mkdir(exist_ok=True)
     with open(output_dir / "data.json", "w", encoding="utf-8") as f:
