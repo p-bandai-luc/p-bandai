@@ -21,56 +21,27 @@ def main():
         )
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 800},
+            viewport={"width": 1280, "height": 900},
             locale="ja-JP"
         )
         page = context.new_page()
         
         try:
             print(f"Accessing URL: {TARGET_URL}")
-            page.goto(TARGET_URL, wait_until="domcontentloaded", timeout=60000)
+            page.goto(TARGET_URL, wait_until="networkidle", timeout=60000)
             page.wait_for_timeout(5000)
-
-            # ページ内のすべてのリンクをチェックしてログに出力
-            links = page.locator("a").all()
-            print(f"Total links found: {len(links)}")
-
-            seen_urls = set()
-            for link in links:
-                href = link.get_attribute("href")
-                if not href or "/item/item-" not in href:
-                    continue
-                
-                full_url = f"https://p-bandai.jp{href}" if href.startswith("/") else href
-                clean_url = full_url.split("?")[0]
-                
-                if clean_url in seen_urls:
-                    continue
-
-                text = link.inner_text().strip()
-                lines = [line.strip() for line in text.split("\n") if line.strip()]
-                if not lines:
-                    continue
-                    
-                title = lines[0]
-                price = ""
-                for line in lines:
-                    if "円" in line or "￥" in line or "¥" in line:
-                        price = line
-                        break
-
-                seen_urls.add(clean_url)
-                scraped_data.append({
-                    "title": title,
-                    "price": price,
-                    "url": clean_url,
-                    "date": now_str
-                })
-
-                if len(scraped_data) >= 10:
-                    break
             
-            print(f"Successfully scraped items count: {len(scraped_data)}")
+            # ページ内の商品カード（または商品名が含まれそうな要素）を広く探す
+            # プレバンの商品名やリンクになりそうなアンカータグをすべて抽出
+            links = page.locator('a[href*="/item/"]').all()
+            print(f"Found {len(links)} links containing '/item/'")
+
+            for i, link in enumerate(links[:15]): # 最初の15件をログに出力して中身を確認
+                href = link.get_attribute("href")
+                text = link.inner_text().strip()
+                print(f"--- Link {i+1} ---")
+                print(f"HREF: {href}")
+                print(f"TEXT:\n{text}\n")
 
         except Exception as e:
             print(f"Error during scraping: {e}")
