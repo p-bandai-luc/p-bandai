@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
-    <!-- ★ クローラー除け・AI学習ブロック用のメタタグ（復旧） -->
+    <!-- クローラー除け・AI学習ブロック用のメタタグ -->
     <meta name="robots" content="noindex, nofollow">
     <meta name="robots" content="noai, odncpa">
     
@@ -18,7 +18,6 @@
             background-color: #f9f9f9;
             color: #333;
         }
-        /* 認証画面のスタイル */
         #auth-screen {
             position: fixed;
             top: 0;
@@ -70,7 +69,6 @@
             margin-top: 10px;
             display: none;
         }
-        /* メインコンテンツ（最初は非表示） */
         #main-content {
             display: none;
         }
@@ -147,7 +145,7 @@
         </div>
     </div>
 
-    <!-- メインコンテンツ（認証後に表示） -->
+    <!-- メインコンテンツ -->
     <div id="main-content">
         <h1>プレミアムバンダイ 最新アイテム (Top 10)</h1>
         <div id="item-container">
@@ -155,13 +153,15 @@
         </div>
     </div>
 
+    <!-- スクリプトを確実にグローバルに定義 -->
     <script>
         const CORRECT_USER = "gunpla";
         const CORRECT_PASS = "gunplaAAA";
 
-        function checkAuth() {
-            const userInput = document.getElementById('username').value;
-            const passInput = document.getElementById('password').value;
+        // グローバルスコープに配置して onclick から確実に呼び出せるようにする
+        window.checkAuth = function() {
+            const userInput = document.getElementById('username').value.trim();
+            const passInput = document.getElementById('password').value.trim();
             const errorMsg = document.getElementById('error-msg');
 
             if (userInput === CORRECT_USER && passInput === CORRECT_PASS) {
@@ -170,9 +170,11 @@
                 sessionStorage.setItem('isLoggedIn', 'true');
                 loadData();
             } else {
-                errorMsg.style.display = 'block';
+                if (errorMsg) {
+                    errorMsg.style.display = 'block';
+                }
             }
-        }
+        };
 
         window.onload = function() {
             if (sessionStorage.getItem('isLoggedIn') === 'true') {
@@ -203,3 +205,50 @@
                     infoDiv.className = 'item-info';
 
                     const titleLink = document.createElement('a');
+                    titleLink.className = 'item-title';
+                    titleLink.href = item.item_url || '#';
+                    titleLink.target = '_blank';
+                    titleLink.textContent = item.title || '名称不明';
+                    infoDiv.appendChild(titleLink);
+
+                    const metaDiv = document.createElement('div');
+                    metaDiv.className = 'item-meta';
+                    metaDiv.innerHTML = `<span class="price">${item.price || ''}</span><span>取得日時: ${item.date || ''}</span>`;
+                    infoDiv.appendChild(metaDiv);
+                    card.appendChild(infoDiv);
+
+                    const buttonsDiv = document.createElement('div');
+                    buttonsDiv.className = 'cart-buttons';
+
+                    const maxQty = item.max || 1;
+                    const orderNo = item.orderNo;
+
+                    if (orderNo) {
+                        for (let qty = 1; qty <= maxQty; qty++) {
+                            const cartObj = { [orderNo]: qty };
+                            const cartUrl = `https://p-bandai.jp/direct_cart_add?orderNos=${encodeURIComponent(JSON.stringify(cartObj))}`;
+
+                            const btn = document.createElement('a');
+                            btn.className = 'cart-btn';
+                            btn.href = cartUrl;
+                            btn.target = '_blank';
+                            btn.textContent = `${qty}個`;
+                            
+                            buttonsDiv.appendChild(btn);
+                        }
+                    } else {
+                        buttonsDiv.innerHTML = '<span style="font-size:0.85rem; color:#999;">注文番号なし</span>';
+                    }
+
+                    card.appendChild(buttonsDiv);
+                    container.appendChild(card);
+                });
+
+            } catch (error) {
+                console.error(error);
+                container.innerHTML = `<div class="no-data" style="color:red;">データの読み込みに失敗しました: ${error.message}</div>`;
+            }
+        }
+    </script>
+</body>
+</html>
