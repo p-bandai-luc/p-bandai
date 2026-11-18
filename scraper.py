@@ -30,7 +30,7 @@ def main():
         )
         context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
-        # まず一覧用ページを作成
+        # 1つのタブ（ページ）だけで最初から最後まで処理する
         page = context.new_page()
         
         try:
@@ -41,11 +41,7 @@ def main():
             # 一覧ページから ga_items を取得
             ga_items = page.evaluate("typeof ga_items !== 'undefined' ? ga_items : null")
             
-            # 一覧ページの役目は終わったので閉じる
-            page.close()
-
             if ga_items and isinstance(ga_items, list):
-                # 最新10件に限定
                 target_items = ga_items[:10]
                 print(f"Found {len(ga_items)} items total. Processing top {len(target_items)} items...")
 
@@ -61,40 +57,47 @@ def main():
                     max_val = 1
 
                     if item_url:
-                        print(f"[{index}/10] Visiting detail page: {clean_name}")
-                        
-                        # ★ 商品ごとに新しいタブ（ページ）を毎回新しく作成してアクセスする
-                        detail_page = context.new_page()
+                        print(f"[{index}/10] Processing: {clean_name}")
                         try:
-                            # 連続アクセスを防ぐランダムなウェート
-                            sleep_sec = random.uniform(3.0, 5.0)
-                            detail_page.wait_for_timeout(int(sleep_sec * 1000))
+                            # ★ 個別ページに行く前にキャッシュやクッキーをクリアして綺麗にする
+                            context.clear_cookies()
+                            
+                            # ランダムなウェート
+                            sleep_sec = random.uniform(5.0, 8.0)
+                            print(f"  Waiting {sleep_sec:.1f}s...")
+                            page.wait_for_timeout(int(sleep_sec * 1000))
 
-                            detail_page.goto(item_url, timeout=30000)
-                            detail_page.wait_for_timeout(2000)
+                            # ★ 新しいタブを開かず、既存のページで直接リンク先に移動する
+                            page.goto(item_url, timeout=30000)
+                            page.wait_for_timeout(3000)
 
-                            # 人間らしい動作を模倣
-                            detail_page.evaluate("window.scrollBy(0, 300)")
-                            detail_page.wait_for_timeout(1000)
+                            # 人間らしい動きを模倣
+                            page.evaluate("window.scrollBy(0, 400)")
+                            page.wait_for_timeout(1500)
 
-                            # orderno_list から "0000000000" に対応する orderNo を取得
-                            orderno_list = detail_page.evaluate("typeof orderno_list !== 'undefined' ? orderno_list : null")
+                            # orderno_list 取得
+                            orderno_list = page.evaluate("typeof orderno_list !== 'undefined' ? orderno_list : null")
                             if orderno_list and isinstance(orderno_list, dict):
                                 order_no = orderno_list.get("0000000000", "")
 
-                            # セレクトボックス (#unit) から最大値 (max) を取得
-                            options = detail_page.eval_on_selector_all("#unit option", "elements => elements.map(e => e.value)")
+                            # セレクトボックス取得
+                            options = page.eval_on_selector_all("#unit option", "elements => elements.map(e => e.value)")
                             valid_qtys = [int(val) for val in options if val.isdigit() and int(val) > 0]
                             if valid_qtys:
                                 max_val = max(valid_qtys)
 
+                            # 次のループのために一覧ページへ戻る
+                            page.goto(TARGET_URL, timeout=30000)
+                            page.wait_for_timeout(3000)
+
                         except Exception as e:
                             print(f"  Error fetching detail page: {e}")
-                        finally:
-                            # 処理が終わったら必ずこのタブを閉じてリソースを解放する
-                            detail_page.close()
+                            # エラーが起きた場合も一覧ページに戻して復帰を試みる
+                            try:
+                                page.goto(TARGET_URL, timeout=30000)
+                            except:
+                                pass
 
-                    # 必要なデータ構造のみ保持
                     scraped_data.append({
                         "title": clean_name,
                         "price": price_str,
