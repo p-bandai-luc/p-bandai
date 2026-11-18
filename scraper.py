@@ -81,6 +81,11 @@ def main():
                                 order_no = orderno_list.get("0000000000", "")
 
                             # セレクトボックス（#unit）から最大購入数を正確に抽出（堅牢化版）
+                            try:
+                                page.wait_for_selector("#unit", timeout=3000)
+                            except:
+                                pass # #unit が無いページ（在庫なし等）の場合はスルー
+
                             max_val = page.evaluate("""() => {
                                 const select = document.querySelector('#unit');
                                 if (!select) return 1;
