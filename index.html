@@ -187,7 +187,7 @@
         async function loadData() {
             const container = document.getElementById('item-container');
             try {
-                const response = await fetch('./data/data.json');
+                const response = await fetch(`./data/data.json?t=${Date.now()}`);
                 if (!response.ok) throw new Error('データの取得に失敗しました。');
                 
                 const items = await response.json();
