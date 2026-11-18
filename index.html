@@ -4,19 +4,75 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
-    <!-- クローラー除け・AI学習ブロック用のメタタグ -->
+    <!-- ★ クローラー除け・AI学習ブロック用のメタタグ（復旧） -->
     <meta name="robots" content="noindex, nofollow">
     <meta name="robots" content="noai, odncpa">
     
     <title>P-Bandai Item List</title>
     <style>
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             max-width: 900px;
             margin: 0 auto;
             padding: 20px;
             background-color: #f9f9f9;
             color: #333;
+        }
+        /* 認証画面のスタイル */
+        #auth-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #f9f9f9;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+        .auth-box {
+            background: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            width: 300px;
+            text-align: center;
+        }
+        .auth-box h2 {
+            margin-bottom: 20px;
+            font-size: 1.2rem;
+        }
+        .auth-box input {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .auth-box button {
+            width: 100%;
+            padding: 10px;
+            background-color: #0066cc;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .auth-box button:hover {
+            background-color: #004b99;
+        }
+        #error-msg {
+            color: #d9534f;
+            font-size: 0.85rem;
+            margin-top: 10px;
+            display: none;
+        }
+        /* メインコンテンツ（最初は非表示） */
+        #main-content {
+            display: none;
         }
         h1 {
             font-size: 1.5rem;
@@ -42,9 +98,7 @@
                 align-items: center;
             }
         }
-        .item-info {
-            flex: 1;
-        }
+        .item-info { flex: 1; }
         .item-title {
             font-size: 1.1rem;
             font-weight: bold;
@@ -53,19 +107,14 @@
             display: inline-block;
             margin-bottom: 5px;
         }
-        .item-title:hover {
-            text-decoration: underline;
-        }
+        .item-title:hover { text-decoration: underline; }
         .item-meta {
             font-size: 0.9rem;
             color: #666;
             display: flex;
             gap: 15px;
         }
-        .price {
-            font-weight: bold;
-            color: #d9534f;
-        }
+        .price { font-weight: bold; color: #d9534f; }
         .cart-buttons {
             display: flex;
             flex-wrap: wrap;
@@ -80,108 +129,77 @@
             text-decoration: none;
             font-size: 0.85rem;
             font-weight: bold;
-            transition: background-color 0.2s;
         }
-        .cart-btn:hover {
-            background-color: #ec971f;
-        }
-        .no-data {
-            text-align: center;
-            color: #888;
-            padding: 40px;
-        }
+        .cart-btn:hover { background-color: #ec971f; }
+        .no-data { text-align: center; color: #888; padding: 40px; }
     </style>
 </head>
 <body>
 
-    <h1>プレミアムバンダイ 最新アイテム (Top 10)</h1>
-    <div id="item-container">
-        <div class="no-data">データを読み込んでいます...</div>
+    <!-- パスワード認証画面 -->
+    <div id="auth-screen">
+        <div class="auth-box">
+            <h2>認証が必要です</h2>
+            <input type="text" id="username" placeholder="ユーザー名 (ID)">
+            <input type="password" id="password" placeholder="パスワード">
+            <button onclick="checkAuth()">ログイン</button>
+            <div id="error-msg">IDまたはパスワードが違います</div>
+        </div>
+    </div>
+
+    <!-- メインコンテンツ（認証後に表示） -->
+    <div id="main-content">
+        <h1>プレミアムバンダイ 最新アイテム (Top 10)</h1>
+        <div id="item-container">
+            <div class="no-data">データを読み込んでいます...</div>
+        </div>
     </div>
 
     <script>
+        const CORRECT_USER = "gunpla";
+        const CORRECT_PASS = "gunplaAAA";
+
+        function checkAuth() {
+            const userInput = document.getElementById('username').value;
+            const passInput = document.getElementById('password').value;
+            const errorMsg = document.getElementById('error-msg');
+
+            if (userInput === CORRECT_USER && passInput === CORRECT_PASS) {
+                document.getElementById('auth-screen').style.display = 'none';
+                document.getElementById('main-content').style.display = 'block';
+                sessionStorage.setItem('isLoggedIn', 'true');
+                loadData();
+            } else {
+                errorMsg.style.display = 'block';
+            }
+        }
+
+        window.onload = function() {
+            if (sessionStorage.getItem('isLoggedIn') === 'true') {
+                document.getElementById('auth-screen').style.display = 'none';
+                document.getElementById('main-content').style.display = 'block';
+                loadData();
+            }
+        };
+
         async function loadData() {
             const container = document.getElementById('item-container');
-            
             try {
-                // data/data.json または同じ階層の data.json を読み込み
                 const response = await fetch('./data/data.json');
-                if (!response.ok) {
-                    throw new Error('データの取得に失敗しました。');
-                }
+                if (!response.ok) throw new Error('データの取得に失敗しました。');
                 
                 const items = await response.json();
-                
                 if (!items || items.length === 0) {
                     container.innerHTML = '<div class="no-data">表示するデータがありません。</div>';
                     return;
                 }
 
-                container.innerHTML = ''; // 読み込み中表示をクリア
-
-                // 最新10件（既にPython側で10件制限していますが念のため）をループ
+                container.innerHTML = '';
                 items.slice(0, 10).forEach(item => {
                     const card = document.createElement('div');
                     card.className = 'item-card';
 
-                    // 左側：商品情報（タイトル、価格、リンク）
                     const infoDiv = document.createElement('div');
                     infoDiv.className = 'item-info';
 
                     const titleLink = document.createElement('a');
-                    titleLink.className = 'item-title';
-                    titleLink.href = item.item_url || '#';
-                    titleLink.target = '_blank';
-                    titleLink.textContent = item.title || '名称不明';
-                    infoDiv.appendChild(titleLink);
-
-                    const metaDiv = document.createElement('div');
-                    metaDiv.className = 'item-meta';
-                    metaDiv.innerHTML = `<span class="price">${item.price || ''}</span><span>取得日時: ${item.date || ''}</span>`;
-                    infoDiv.appendChild(metaDiv);
-
-                    card.appendChild(infoDiv);
-
-                    // 右側：数量に応じたカート追加ボタン群
-                    const buttonsDiv = document.createElement('div');
-                    buttonsDiv.className = 'cart-buttons';
-
-                    const maxQty = item.max || 1;
-                    const orderNo = item.orderNo;
-
-                    if (orderNo) {
-                        for (let qty = 1; qty <= maxQty; qty++) {
-                            // orderNo と quantity を使ったカート追加オブジェクトを生成
-                            const cartObj = { [orderNo]: qty };
-                            const jsonStr = JSON.stringify(cartObj);
-                            
-                            // URLエンコードしてダイレクトカート追加用URLを作成
-                            const cartUrl = `https://p-bandai.jp/direct_cart_add?orderNos=${encodeURIComponent(jsonStr)}`;
-
-                            const btn = document.createElement('a');
-                            btn.className = 'cart-btn';
-                            btn.href = cartUrl;
-                            btn.target = '_blank';
-                            btn.textContent = `${qty}個`;
-                            
-                            buttonsDiv.appendChild(btn);
-                        }
-                    } else {
-                        buttonsDiv.innerHTML = '<span style="font-size:0.85rem; color:#999;">注文番号なし</span>';
-                    }
-
-                    card.appendChild(buttonsDiv);
-                    container.appendChild(card);
-                });
-
-            } catch (error) {
-                console.error(error);
-                container.innerHTML = `<div class="no-data" style="color:red;">データの読み込みに失敗しました: ${error.message}</div>`;
-            }
-        }
-
-        // ページ読み込み時に実行
-        loadData();
-    </script>
-</body>
-</html>
