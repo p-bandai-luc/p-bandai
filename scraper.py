@@ -29,6 +29,8 @@ def main():
             java_script_enabled=True
         )
         context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        
+        # まず一覧用ページを作成
         page = context.new_page()
         
         try:
@@ -39,6 +41,9 @@ def main():
             # 一覧ページから ga_items を取得
             ga_items = page.evaluate("typeof ga_items !== 'undefined' ? ga_items : null")
             
+            # 一覧ページの役目は終わったので閉じる
+            page.close()
+
             if ga_items and isinstance(ga_items, list):
                 # 最新10件に限定
                 target_items = ga_items[:10]
@@ -57,31 +62,37 @@ def main():
 
                     if item_url:
                         print(f"[{index}/10] Visiting detail page: {clean_name}")
+                        
+                        # ★ 商品ごとに新しいタブ（ページ）を毎回新しく作成してアクセスする
+                        detail_page = context.new_page()
                         try:
-                            # ★ 連続アクセスによるブロックを防ぐため、3秒〜6秒のランダムなウェートを入れる
-                            sleep_sec = random.uniform(3.0, 6.0)
-                            page.wait_for_timeout(int(sleep_sec * 1000))
+                            # 連続アクセスを防ぐランダムなウェート
+                            sleep_sec = random.uniform(3.0, 5.0)
+                            detail_page.wait_for_timeout(int(sleep_sec * 1000))
 
-                            page.goto(item_url, timeout=30000)
-                            page.wait_for_timeout(2000)
+                            detail_page.goto(item_url, timeout=30000)
+                            detail_page.wait_for_timeout(2000)
 
-                            # ★ 人間らしい動作を模倣して少しスクロールする
-                            page.evaluate("window.scrollBy(0, 300)")
-                            page.wait_for_timeout(1500)
+                            # 人間らしい動作を模倣
+                            detail_page.evaluate("window.scrollBy(0, 300)")
+                            detail_page.wait_for_timeout(1000)
 
                             # orderno_list から "0000000000" に対応する orderNo を取得
-                            orderno_list = page.evaluate("typeof orderno_list !== 'undefined' ? orderno_list : null")
+                            orderno_list = detail_page.evaluate("typeof orderno_list !== 'undefined' ? orderno_list : null")
                             if orderno_list and isinstance(orderno_list, dict):
                                 order_no = orderno_list.get("0000000000", "")
 
                             # セレクトボックス (#unit) から最大値 (max) を取得
-                            options = page.eval_on_selector_all("#unit option", "elements => elements.map(e => e.value)")
+                            options = detail_page.eval_on_selector_all("#unit option", "elements => elements.map(e => e.value)")
                             valid_qtys = [int(val) for val in options if val.isdigit() and int(val) > 0]
                             if valid_qtys:
                                 max_val = max(valid_qtys)
 
                         except Exception as e:
                             print(f"  Error fetching detail page: {e}")
+                        finally:
+                            # 処理が終わったら必ずこのタブを閉じてリソースを解放する
+                            detail_page.close()
 
                     # 必要なデータ構造のみ保持
                     scraped_data.append({
