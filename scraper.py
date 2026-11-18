@@ -1,18 +1,18 @@
 import json
-import os
 import random
-import time
-from datetime import datetime
+import re
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from playwright.sync_api import sync_playwright
 
-# ご指定の検索・絞り込み済みURLを設定
 TARGET_URL = "https://p-bandai.jp/chara/c0010/?q=&q2=&C1=c0010&C2=S0004%2CS0075&C3=&C4=&C5=&C6=&C7=&C8=&p=&c=60&sort=1&exact_dictionary_list=&page=1&search_on_flg=1&select_sc=&op_sf=0&op_cate=&op_cname=&op_ckana="
 
-def scrape_p_bandai():
-    data_list = []
-    
+def main():
+    scraped_data = []
+    jst = timezone(timedelta(hours=+9), 'JST')
+    now_str = datetime.now(jst).strftime('%Y-%m-%d %H:%M')
+
     with sync_playwright() as p:
-        # ブラウザを起動（headless=True で完全に裏で実行）
         browser = p.chromium.launch(
             headless=True,
             args=[
@@ -22,172 +22,113 @@ def scrape_p_bandai():
             ]
         )
         
-        # ボット検知を避けるためのUser-Agentやビューポートの設定
         context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={"width": 1920, "height": 1080}
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 900},
+            locale="ja-JP",
+            java_script_enabled=True
         )
+        context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
+        # 1つのタブ（ページ）だけで最初から最後まで処理する
         page = context.new_page()
         
-        print("一覧ページにアクセス中...")
         try:
+            print(f"Accessing URL: {TARGET_URL}")
             page.goto(TARGET_URL, timeout=60000)
-            page.wait_for_load_state("networkidle", timeout=15000)
-        except Exception as e:
-            print(f"[警告] 一覧ページのロード待機タイムアウト（続行します）: {e}")
-            
-        # 人間らしいスクロール動作のシミュレーション
-        page.evaluate("window.scrollTo(0, document.body.scrollHeight / 3);")
-        time.sleep(random.uniform(2.0, 4.0))
-        
-        # トップ10の商品要素を取得
-        item_elements = page.query_selector_all(".itemBox, .item-box, .c-item-box, li.item, .elg-itemBox")
-        
-        # もし特定の共通クラスで取れない場合のフォールバック（リンク構造からの抽出）
-        if not item_elements:
-            print("標準セレクタでの取得ができなかったため、商品リンクから抽出を試みます...")
-            links = page.query_selector_all("a[href*='/item/item-']")
-            seen_urls = set()
-            target_items = []
-            
-            for link in links:
-                href = link.get_attribute("href")
-                if href and "/item/item-" in href:
-                    if not href.startswith("http"):
-                        href = "https://p-bandai.jp" + href
-                    clean_url = href.split("?")[0].split("#")[0]
-                    if clean_url not in seen_urls:
-                        seen_urls.add(clean_url)
-                        title = link.inner_text().strip()
-                        if not title:
-                            title = "名称不明"
-                        target_items.append({"url": clean_url, "title": title})
-                        if len(target_items) >= 10:
-                            break
-            items_to_process = target_items
-        else:
-            items_to_process = []
-            for el in item_elements[:10]:
-                title_el = el.query_selector("a, .item-title, .title")
-                link_el = el.query_selector("a[href*='/item/item-']")
-                price_el = el.query_selector(".price, .item-price, .value")
-                
-                url = link_el.get_attribute("href") if link_el else ""
-                if url and not url.startswith("http"):
-                    url = "https://p-bandai.jp" + url
-                
-                title = title_el.inner_text().strip() if title_el else "名称不明"
-                price = price_el.inner_text().strip() if price_el else ""
-                
-                if url:
-                    items_to_process.append({"url": url, "title": title, "price": price})
+            page.wait_for_timeout(5000)
 
-        print(f"対象アイテム数: {len(items_to_process)}件。詳細ページを解析します...")
-        
-        # 各商品の詳細ページを巡回
-        for idx, item in enumerate(items_to_process[:10], 1):
-            item_url = item["url"]
-            title = item.get("title", "名称不明")
-            price = item.get("price", "")
+            # 一覧ページから ga_items を取得
+            ga_items = page.evaluate("typeof ga_items !== 'undefined' ? ga_items : null")
             
-            print(f"[{idx}/10] 解析中: {title}")
-            
-            order_no = ""
-            max_qty = 1
-            
-            try:
-                # WAFブロック回避のため、ページ移動前にCookieをクリア
-                context.clear_cookies()
-                
-                page.goto(item_url, timeout=60000)
-                page.wait_for_load_state("domcontentloaded", timeout=15000)
-                
-                # 人間らしいランダムなウェイト (6〜10秒)
-                sleep_sec = random.uniform(6.0, 10.0)
-                time.sleep(sleep_sec)
-                
-                # 注文番号およびセレクトボックスからの正確な最大数量の抽出
-                extracted_data = page.evaluate("""() => {
-                    let oNo = "";
-                    let mQty = 1;
+            if ga_items and isinstance(ga_items, list):
+                target_items = ga_items[:10]
+                print(f"Found {len(ga_items)} items total. Processing top {len(target_items)} items...")
 
-                    // 1. orderno_list 変数から注文番号を取得
-                    try {
-                        if (typeof orderno_list !== 'undefined') {
-                            for (let key in orderno_list) {
-                                let val = orderno_list[key];
-                                if (typeof val === 'string' && val.length > 5 && !val.includes('http')) {
-                                    oNo = val;
-                                    break;
+                for index, item in enumerate(target_items, 1):
+                    raw_name = item.get("item_name", "")
+                    clean_name = re.sub(r'^\d+_', '', raw_name)
+                    item_url = item.get("item_category5", "")
+                    
+                    price_val = item.get("price", "")
+                    price_str = f"¥{int(price_val):,}" if str(price_val).isdigit() else price_val
+
+                    order_no = ""
+                    max_val = 1
+
+                    if item_url:
+                        print(f"[{index}/10] Processing: {clean_name}")
+                        try:
+                            # 個別ページに行く前にキャッシュやクッキーをクリアして綺麗にする
+                            context.clear_cookies()
+                            
+                            # ランダムなウェート
+                            sleep_sec = random.uniform(5.0, 8.0)
+                            print(f"  Waiting {sleep_sec:.1f}s...")
+                            page.wait_for_timeout(int(sleep_sec * 1000))
+
+                            # 新しいタブを開かず、既存のページで直接リンク先に移動する
+                            page.goto(item_url, timeout=30000)
+                            page.wait_for_timeout(3000)
+
+                            # 人間らしい動きを模倣
+                            page.evaluate("window.scrollBy(0, 400)")
+                            page.wait_for_timeout(1500)
+
+                            # orderno_list 取得
+                            orderno_list = page.evaluate("typeof orderno_list !== 'undefined' ? orderno_list : null")
+                            if orderno_list and isinstance(orderno_list, dict):
+                                order_no = orderno_list.get("0000000000", "")
+
+                            # セレクトボックス（#unit）から最大購入数を正確に抽出（堅牢化版）
+                            max_val = page.evaluate("""() => {
+                                const select = document.querySelector('#unit');
+                                if (!select) return 1;
+
+                                let maxQty = 1;
+                                for (let option of select.options) {
+                                    const val = parseInt(option.value, 10);
+                                    if (!isNaN(val) && val > maxQty) {
+                                        maxQty = val;
+                                    }
                                 }
-                            }
-                        }
-                    } catch (e) {}
+                                return maxQty;
+                            }""")
 
-                    // 2. DOM内から orderNo に該当しそうな文字列やinput要素を探す
-                    if (!oNo) {
-                        const inputs = document.querySelectorAll('input[name*="order"], input[type="hidden"]');
-                        for (let input of inputs) {
-                            let val = input.value;
-                            if (val && val.length >= 7 && /^\d+$/.test(val)) {
-                                oNo = val;
-                                break;
-                            }
-                        }
-                    }
+                            # 次のループのために一覧ページへ戻る
+                            page.goto(TARGET_URL, timeout=30000)
+                            page.wait_for_timeout(3000)
 
-                    // 3. #unit セレクトボックスのオプションから最大購入数を正確に抽出
-                    const select = document.querySelector('#unit');
-                    if (select) {
-                        for (let option of select.options) {
-                            const val = parseInt(option.value, 10);
-                            if (!isNaN(val) && val > mQty) {
-                                mQty = val;
-                            }
-                        }
-                    }
+                        except Exception as e:
+                            print(f"  Error fetching detail page: {e}")
+                            # エラーが起きた場合も一覧ページに戻して復帰を試みる
+                            try:
+                                page.goto(TARGET_URL, timeout=30000)
+                            except:
+                                pass
 
-                    return { orderNo: oNo, max: mQty };
-                }""")
-                
-                order_no = extracted_data.get("orderNo", "")
-                max_qty = extracted_data.get("max", 1)
-                
-            except Exception as e:
-                print(f"[エラー] 詳細ページの取得に失敗 ({item_url}): {e}")
+                    scraped_data.append({
+                        "title": clean_name,
+                        "price": price_str,
+                        "item_url": item_url,
+                        "orderNo": order_no,
+                        "max": max_val,
+                        "date": now_str
+                    })
+            else:
+                print("ga_items is not defined.")
 
-            # 価格が空だった場合のフォールバック抽出
-            if not price:
-                try:
-                    price_element = page.query_selector(".price, .item-price, .sellingPrice")
-                    if price_element:
-                        price = price_element.inner_text().strip()
-                except Exception:
-                    pass
+        except Exception as e:
+            print(f"Error: {e}")
+        finally:
+            browser.close()
 
-            current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
-            
-            data_list.append({
-                "title": title.replace("\n", " "),
-                "price": price,
-                "item_url": item_url,
-                "orderNo": order_no,
-                "max": max_qty,
-                "date": current_time
-            })
-            
-        browser.close()
-
-    # dataフォルダが存在しない場合は作成
-    os.makedirs("data", exist_ok=True)
+    output_dir = Path("data")
+    output_dir.mkdir(exist_ok=True)
+    with open(output_dir / "data.json", "w", encoding="utf-8") as f:
+        json.dump(scraped_data, f, ensure_ascii=False, indent=2)
     
-    # data.json として保存
-    file_path = "data/data.json"
-    with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(data_list, f, ensure_ascii=False, indent=2)
-        
-    print(f"スクレイピング完了！データを {file_path} に保存しました。")
+    print(f"Saved {len(scraped_data)} items to data.json")
 
 if __name__ == "__main__":
-    scrape_p_bandai()
+    main()
