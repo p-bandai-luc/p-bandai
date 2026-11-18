@@ -1,254 +1,194 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+import json
+import os
+import random
+import time
+from datetime import datetime
+from playwright.sync_api import sync_playwright
+
+# 検索対象のURL（ご自身の環境に合わせて設定しているURL）
+TARGET_URL = "https://p-bandai.jp/chara/c0010/hg/?sort=dl&n=10"
+
+def scrape_p_bandai():
+    data_list = []
     
-    <!-- クローラー除け・AI学習ブロック用のメタタグ -->
-    <meta name="robots" content="noindex, nofollow">
-    <meta name="robots" content="noai, odncpa">
-    
-    <title>P-Bandai Item List</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            max-width: 900px;
-            margin: 0 auto;
-            padding: 20px;
-            background-color: #f9f9f9;
-            color: #333;
-        }
-        #auth-screen {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: #f9f9f9;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 9999;
-        }
-        .auth-box {
-            background: #fff;
-            padding: 30px;
-            border-radius: 8px;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-            width: 300px;
-            text-align: center;
-        }
-        .auth-box h2 {
-            margin-bottom: 20px;
-            font-size: 1.2rem;
-        }
-        .auth-box input {
-            width: 100%;
-            padding: 10px;
-            margin-bottom: 15px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            box-sizing: border-box;
-        }
-        .auth-box button {
-            width: 100%;
-            padding: 10px;
-            background-color: #0066cc;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            font-weight: bold;
-            cursor: pointer;
-        }
-        .auth-box button:hover {
-            background-color: #004b99;
-        }
-        #error-msg {
-            color: #d9534f;
-            font-size: 0.85rem;
-            margin-top: 10px;
-            display: none;
-        }
-        #main-content {
-            display: none;
-        }
-        h1 {
-            font-size: 1.5rem;
-            border-bottom: 2px solid #ccc;
-            padding-bottom: 8px;
-            margin-bottom: 20px;
-        }
-        .item-card {
-            background: #fff;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            padding: 15px;
-            margin-bottom: 15px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-        @media (min-width: 600px) {
-            .item-card {
-                flex-direction: row;
-                justify-content: space-between;
-                align-items: center;
-            }
-        }
-        .item-info { flex: 1; }
-        .item-title {
-            font-size: 1.1rem;
-            font-weight: bold;
-            color: #0066cc;
-            text-decoration: none;
-            display: inline-block;
-            margin-bottom: 5px;
-        }
-        .item-title:hover { text-decoration: underline; }
-        .item-meta {
-            font-size: 0.9rem;
-            color: #666;
-            display: flex;
-            gap: 15px;
-        }
-        .price { font-weight: bold; color: #d9534f; }
-        .cart-buttons {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-            align-items: center;
-        }
-        .cart-btn {
-            background-color: #f0ad4e;
-            color: #fff;
-            padding: 6px 12px;
-            border-radius: 4px;
-            text-decoration: none;
-            font-size: 0.85rem;
-            font-weight: bold;
-        }
-        .cart-btn:hover { background-color: #ec971f; }
-        .no-data { text-align: center; color: #888; padding: 40px; }
-    </style>
-</head>
-<body>
-
-    <!-- パスワード認証画面 -->
-    <div id="auth-screen">
-        <div class="auth-box">
-            <h2>認証が必要です</h2>
-            <input type="text" id="username" placeholder="ユーザー名 (ID)">
-            <input type="password" id="password" placeholder="パスワード">
-            <button onclick="checkAuth()">ログイン</button>
-            <div id="error-msg">IDまたはパスワードが違います</div>
-        </div>
-    </div>
-
-    <!-- メインコンテンツ -->
-    <div id="main-content">
-        <h1>プレミアムバンダイ 最新アイテム (Top 10)</h1>
-        <div id="item-container">
-            <div class="no-data">データを読み込んでいます...</div>
-        </div>
-    </div>
-
-    <script>
-        const CORRECT_USER = "gunpla";
-        const CORRECT_PASS = "gunplaAAA";
-
-        // グローバルスコープに定義してボタンから確実に呼び出せるようにする
-        window.checkAuth = function() {
-            const userInput = document.getElementById('username').value.trim();
-            const passInput = document.getElementById('password').value.trim();
-            const errorMsg = document.getElementById('error-msg');
-
-            if (userInput === CORRECT_USER && passInput === CORRECT_PASS) {
-                document.getElementById('auth-screen').style.display = 'none';
-                document.getElementById('main-content').style.display = 'block';
-                sessionStorage.setItem('isLoggedIn', 'true');
-                loadData();
-            } else {
-                if (errorMsg) {
-                    errorMsg.style.display = 'block';
-                }
-            }
-        };
-
-        window.onload = function() {
-            if (sessionStorage.getItem('isLoggedIn') === 'true') {
-                document.getElementById('auth-screen').style.display = 'none';
-                document.getElementById('main-content').style.display = 'block';
-                loadData();
-            }
-        };
-
-        async function loadData() {
-            const container = document.getElementById('item-container');
-            try {
-                // キャッシュを強制回避して常に最新の data.json を取得するパラメータ付き
-                const response = await fetch(`./data/data.json?t=${Date.now()}`);
-                if (!response.ok) throw new Error('データの取得に失敗しました。');
+    with sync_playwright() as p:
+        # ブラウザを起動（headless=True で完全に裏で実行）
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--disable-infobars",
+                "--start-maximized"
+            ]
+        )
+        
+        # ボット検知を避けるためのUser-Agentやビューポートの設定
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={"width": 1920, "height": 1080}
+        )
+        
+        page = context.new_page()
+        
+        print("一覧ページにアクセス中...")
+        try:
+            page.goto(TARGET_URL, timeout=60000)
+            page.wait_for_load_state("networkidle", timeout=15000)
+        except Exception as e:
+            print(f"[警告] 一覧ページのロード待機タイムアウト（続行します）: {e}")
+            
+        # 人間らしいスクロール動作のシミュレーション
+        page.evaluate("window.scrollTo(0, document.body.scrollHeight / 3);")
+        time.sleep(random.uniform(2.0, 4.0))
+        
+        # トップ10の商品要素を取得
+        item_elements = page.query_selector_all(".itemBox, .item-box, .c-item-box, li.item, .elg-itemBox")
+        
+        # もし特定の共通クラスで取れない場合のフォールバック（リンク構造からの抽出）
+        if not item_elements:
+            print("標準セレクタでの取得ができなかったため、商品リンクから抽出を試みます...")
+            links = page.query_selector_all("a[href*='/item/item-']")
+            seen_urls = set()
+            target_items = []
+            
+            for link in links:
+                href = link.get_attribute("href")
+                if href and "/item/item-" in href:
+                    if not href.startswith("http"):
+                        href = "https://p-bandai.jp" + href
+                    # URLの正規化（クエリやハッシュを除外）
+                    clean_url = href.split("?")[0].split("#")[0]
+                    if clean_url not in seen_urls:
+                        seen_urls.add(clean_url)
+                        title = link.inner_text().strip()
+                        if not title:
+                            title = "名称不明"
+                        target_items.append({"url": clean_url, "title": title})
+                        if len(target_items) >= 10:
+                            break
+            items_to_process = target_items
+        else:
+            items_to_process = []
+            for el in item_elements[:10]:
+                title_el = el.query_selector("a, .item-title, .title")
+                link_el = el.query_selector("a[href*='/item/item-']")
+                price_el = el.query_selector(".price, .item-price, .value")
                 
-                const items = await response.json();
-                if (!items || items.length === 0) {
-                    container.innerHTML = '<div class="no-data">表示するデータがありません。</div>';
-                    return;
-                }
+                url = link_el.get_attribute("href") if link_el else ""
+                if url and not url.startswith("http"):
+                    url = "https://p-bandai.jp" + url
+                
+                title = title_el.inner_text().strip() if title_el else "名称不明"
+                price = price_el.inner_text().strip() if price_el else ""
+                
+                if url:
+                    items_to_process.append({"url": url, "title": title, "price": price})
 
-                container.innerHTML = '';
-                items.slice(0, 10).forEach(item => {
-                    const card = document.createElement('div');
-                    card.className = 'item-card';
+        print(f"対象アイテム数: {len(items_to_process)}件。詳細ページを解析します...")
+        
+        # 各商品の詳細ページを巡回
+        for idx, item in enumerate(items_to_process[:10], 1):
+            item_url = item["url"]
+            title = item.get("title", "名称不明")
+            price = item.get("price", "")
+            
+            print(f"[{idx}/10] 解析中: {title}")
+            
+            order_no = ""
+            max_qty = 1
+            
+            try:
+                # WAFブロック回避のため、ページ移動前にCookieをクリア
+                context.clear_cookies()
+                
+                page.goto(item_url, timeout=60000)
+                page.wait_for_load_state("domcontentloaded", timeout=15000)
+                
+                # 人間らしいランダムなウェイト (6〜10秒)
+                sleep_sec = random.uniform(6.0, 10.0)
+                time.sleep(sleep_sec)
+                
+                # ページ内のJavaScript変数や要素から orderNo と max を安全に抽出
+                extracted_data = page.evaluate("""() => {
+                    let oNo = "";
+                    let mQty = 1;
 
-                    const infoDiv = document.createElement('div');
-                    infoDiv.className = 'item-info';
-
-                    const titleLink = document.createElement('a');
-                    titleLink.className = 'item-title';
-                    titleLink.href = item.item_url || '#';
-                    titleLink.target = '_blank';
-                    titleLink.textContent = item.title || '名称不明';
-                    infoDiv.appendChild(titleLink);
-
-                    const metaDiv = document.createElement('div');
-                    metaDiv.className = 'item-meta';
-                    metaDiv.innerHTML = `<span class="price">${item.price || ''}</span><span>取得日時: ${item.date || ''}</span>`;
-                    infoDiv.appendChild(metaDiv);
-                    card.appendChild(infoDiv);
-
-                    const buttonsDiv = document.createElement('div');
-                    buttonsDiv.className = 'cart-buttons';
-
-                    const maxQty = item.max || 1;
-                    const orderNo = item.orderNo;
-
-                    if (orderNo) {
-                        for (let qty = 1; qty <= maxQty; qty++) {
-                            const cartObj = { [orderNo]: qty };
-                            const cartUrl = `https://p-bandai.jp/direct_cart_add?orderNos=${encodeURIComponent(JSON.stringify(cartObj))}`;
-
-                            const btn = document.createElement('a');
-                            btn.className = 'cart-btn';
-                            btn.href = cartUrl;
-                            btn.target = '_blank';
-                            btn.textContent = `${qty}個`;
-                            
-                            buttonsDiv.appendChild(btn);
+                    // 1. orderno_list 変数から注文番号を取得
+                    try {
+                        if (typeof orderno_list !== 'undefined') {
+                            for (let key in orderno_list) {
+                                let val = orderno_list[key];
+                                if (typeof val === 'string' && val.length > 5 && !val.includes('http')) {
+                                    oNo = val;
+                                    break;
+                                }
+                            }
                         }
-                    } else {
-                        buttonsDiv.innerHTML = '<span style="font-size:0.85rem; color:#999;">注文番号なし</span>';
+                    } catch (e) {}
+
+                    // 2. DOM内から orderNo に該当しそうな文字列やinput要素を探す
+                    if (!oNo) {
+                        const inputs = document.querySelectorAll('input[name*="order"], input[type="hidden"]');
+                        for (let input of inputs) {
+                            let val = input.value;
+                            if (val && val.length >= 7 && /^\d+$/.test(val)) {
+                                oNo = val;
+                                break;
+                            }
+                        }
                     }
 
-                    card.appendChild(buttonsDiv);
-                    container.appendChild(card);
-                });
+                    // 3. #unit セレクトボックスから最大購入数を正確に抽出
+                    const select = document.querySelector('#unit');
+                    if (select) {
+                        for (let option of select.options) {
+                            const val = parseInt(option.value, 10);
+                            if (!isNaN(val) && val > mQty) {
+                                mQty = val;
+                            }
+                        }
+                    }
 
-            } catch (error) {
-                console.error(error);
-                container.innerHTML = `<div class="no-data" style="color:red;">データの読み込みに失敗しました: ${error.message}</div>`;
-            }
-        }
-    </script>
-</body>
-</html>
+                    return { orderNo: oNo, max: mQty };
+                }""")
+                
+                order_no = extracted_data.get("orderNo", "")
+                max_qty = extracted_data.get("max", 1)
+                
+            except Exception as e:
+                print(f"[エラー] 詳細ページの取得に失敗 ({item_url}): {e}")
+
+            # 価格が空だった場合のフォールバック抽出
+            if not price:
+                try:
+                    price_element = page.query_selector(".price, .item-price, .sellingPrice")
+                    if price_element:
+                        price = price_element.inner_text().strip()
+                except Exception:
+                    pass
+
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+            
+            data_list.append({
+                "title": title.replace("\n", " "),
+                "price": price,
+                "item_url": item_url,
+                "orderNo": order_no,
+                "max": max_qty,
+                "date": current_time
+            })
+            
+        browser.close()
+
+    # dataフォルダが存在しない場合は作成
+    os.makedirs("data", exist_ok=True)
+    
+    # data.json として保存
+    file_path = "data/data.json"
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(data_list, f, ensure_ascii=False, indent=2)
+        
+    print(f"スクレイピング完了！データを {file_path} に保存しました。")
+
+if __name__ == "__main__":
+    scrape_p_bandai()
