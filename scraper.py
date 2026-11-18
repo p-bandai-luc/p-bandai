@@ -1,4 +1,5 @@
 import json
+import random
 import re
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -39,7 +40,7 @@ def main():
             ga_items = page.evaluate("typeof ga_items !== 'undefined' ? ga_items : null")
             
             if ga_items and isinstance(ga_items, list):
-                # ★ 最新10件に限定
+                # 最新10件に限定
                 target_items = ga_items[:10]
                 print(f"Found {len(ga_items)} items total. Processing top {len(target_items)} items...")
 
@@ -57,15 +58,23 @@ def main():
                     if item_url:
                         print(f"[{index}/10] Visiting detail page: {clean_name}")
                         try:
-                            page.goto(item_url, timeout=30000)
-                            page.wait_for_timeout(3000)
+                            # ★ 連続アクセスによるブロックを防ぐため、3秒〜6秒のランダムなウェートを入れる
+                            sleep_sec = random.uniform(3.0, 6.0)
+                            page.wait_for_timeout(int(sleep_sec * 1000))
 
-                            # ★ orderno_list から "0000000000" に対応する orderNo を取得
+                            page.goto(item_url, timeout=30000)
+                            page.wait_for_timeout(2000)
+
+                            # ★ 人間らしい動作を模倣して少しスクロールする
+                            page.evaluate("window.scrollBy(0, 300)")
+                            page.wait_for_timeout(1500)
+
+                            # orderno_list から "0000000000" に対応する orderNo を取得
                             orderno_list = page.evaluate("typeof orderno_list !== 'undefined' ? orderno_list : null")
                             if orderno_list and isinstance(orderno_list, dict):
                                 order_no = orderno_list.get("0000000000", "")
 
-                            # ★ セレクトボックス (#unit) から最大値 (max) を取得
+                            # セレクトボックス (#unit) から最大値 (max) を取得
                             options = page.eval_on_selector_all("#unit option", "elements => elements.map(e => e.value)")
                             valid_qtys = [int(val) for val in options if val.isdigit() and int(val) > 0]
                             if valid_qtys:
