@@ -5,8 +5,8 @@ import time
 from datetime import datetime
 from playwright.sync_api import sync_playwright
 
-# 検索対象のURL（ご自身の環境に合わせて設定しているURL）
-TARGET_URL = "https://p-bandai.jp/chara/c0010/hg/?sort=dl&n=10"
+# ご指定の検索・絞り込み済みURLを設定
+TARGET_URL = "https://p-bandai.jp/chara/c0010/?q=&q2=&C1=c0010&C2=S0004%2CS0075&C3=&C4=&C5=&C6=&C7=&C8=&p=&c=60&sort=1&exact_dictionary_list=&page=1&search_on_flg=1&select_sc=&op_sf=0&op_cate=&op_cname=&op_ckana="
 
 def scrape_p_bandai():
     data_list = []
@@ -56,7 +56,6 @@ def scrape_p_bandai():
                 if href and "/item/item-" in href:
                     if not href.startswith("http"):
                         href = "https://p-bandai.jp" + href
-                    # URLの正規化（クエリやハッシュを除外）
                     clean_url = href.split("?")[0].split("#")[0]
                     if clean_url not in seen_urls:
                         seen_urls.add(clean_url)
@@ -108,7 +107,7 @@ def scrape_p_bandai():
                 sleep_sec = random.uniform(6.0, 10.0)
                 time.sleep(sleep_sec)
                 
-                # ページ内のJavaScript変数や要素から orderNo と max を安全に抽出
+                # 注文番号およびセレクトボックスからの正確な最大数量の抽出
                 extracted_data = page.evaluate("""() => {
                     let oNo = "";
                     let mQty = 1;
@@ -138,7 +137,7 @@ def scrape_p_bandai():
                         }
                     }
 
-                    // 3. #unit セレクトボックスから最大購入数を正確に抽出
+                    // 3. #unit セレクトボックスのオプションから最大購入数を正確に抽出
                     const select = document.querySelector('#unit');
                     if (select) {
                         for (let option of select.options) {
