@@ -1,125 +1,254 @@
-import json
-import random
-import re
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
-from playwright.sync_api import sync_playwright
-
-TARGET_URL = "https://p-bandai.jp/chara/c0010/?q=&q2=&C1=c0010&C2=S0004%2CS0075&C3=&C4=&C5=&C6=&C7=&C8=&p=&c=60&sort=1&exact_dictionary_list=&page=1&search_on_flg=1&select_sc=&op_sf=0&op_cate=&op_cname=&op_ckana="
-
-def main():
-    scraped_data = []
-    jst = timezone(timedelta(hours=+9), 'JST')
-    now_str = datetime.now(jst).strftime('%Y-%m-%d %H:%M')
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--disable-infobars",
-                "--start-maximized"
-            ]
-        )
-        
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 900},
-            locale="ja-JP",
-            java_script_enabled=True
-        )
-        context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        
-        # 1つのタブ（ページ）だけで最初から最後まで処理する
-        page = context.new_page()
-        
-        try:
-            print(f"Accessing URL: {TARGET_URL}")
-            page.goto(TARGET_URL, timeout=60000)
-            page.wait_for_timeout(5000)
-
-            # 一覧ページから ga_items を取得
-            ga_items = page.evaluate("typeof ga_items !== 'undefined' ? ga_items : null")
-            
-            if ga_items and isinstance(ga_items, list):
-                target_items = ga_items[:10]
-                print(f"Found {len(ga_items)} items total. Processing top {len(target_items)} items...")
-
-                for index, item in enumerate(target_items, 1):
-                    raw_name = item.get("item_name", "")
-                    clean_name = re.sub(r'^\d+_', '', raw_name)
-                    item_url = item.get("item_category5", "")
-                    
-                    price_val = item.get("price", "")
-                    price_str = f"¥{int(price_val):,}" if str(price_val).isdigit() else price_val
-
-                    order_no = ""
-                    max_val = 1
-
-                    if item_url:
-                        print(f"[{index}/10] Processing: {clean_name}")
-                        try:
-                            # ★ 個別ページに行く前にキャッシュやクッキーをクリアして綺麗にする
-                            context.clear_cookies()
-                            
-                            # ランダムなウェート
-                            sleep_sec = random.uniform(5.0, 8.0)
-                            print(f"  Waiting {sleep_sec:.1f}s...")
-                            page.wait_for_timeout(int(sleep_sec * 1000))
-
-                            # ★ 新しいタブを開かず、既存のページで直接リンク先に移動する
-                            page.goto(item_url, timeout=30000)
-                            page.wait_for_timeout(3000)
-
-                            # 人間らしい動きを模倣
-                            page.evaluate("window.scrollBy(0, 400)")
-                            page.wait_for_timeout(1500)
-
-                            # orderno_list 取得
-                            orderno_list = page.evaluate("typeof orderno_list !== 'undefined' ? orderno_list : null")
-                            if orderno_list and isinstance(orderno_list, dict):
-                                order_no = orderno_list.get("0000000000", "")
-
-                            # セレクトボックス取得
-                            options = page.eval_on_selector_all("#unit option", "elements => elements.map(e => e.value)")
-                            valid_qtys = [int(val) for val in options if val.isdigit() and int(val) > 0]
-                            if valid_qtys:
-                                max_val = max(valid_qtys)
-
-                            # 次のループのために一覧ページへ戻る
-                            page.goto(TARGET_URL, timeout=30000)
-                            page.wait_for_timeout(3000)
-
-                        except Exception as e:
-                            print(f"  Error fetching detail page: {e}")
-                            # エラーが起きた場合も一覧ページに戻して復帰を試みる
-                            try:
-                                page.goto(TARGET_URL, timeout=30000)
-                            except:
-                                pass
-
-                    scraped_data.append({
-                        "title": clean_name,
-                        "price": price_str,
-                        "item_url": item_url,
-                        "orderNo": order_no,
-                        "max": max_val,
-                        "date": now_str
-                    })
-            else:
-                print("ga_items is not defined.")
-
-        except Exception as e:
-            print(f"Error: {e}")
-        finally:
-            browser.close()
-
-    output_dir = Path("data")
-    output_dir.mkdir(exist_ok=True)
-    with open(output_dir / "data.json", "w", encoding="utf-8") as f:
-        json.dump(scraped_data, f, ensure_ascii=False, indent=2)
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
-    print(f"Saved {len(scraped_data)} items to data.json")
+    <!-- クローラー除け・AI学習ブロック用のメタタグ -->
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="robots" content="noai, odncpa">
+    
+    <title>P-Bandai Item List</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f9f9f9;
+            color: #333;
+        }
+        #auth-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #f9f9f9;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+        .auth-box {
+            background: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            width: 300px;
+            text-align: center;
+        }
+        .auth-box h2 {
+            margin-bottom: 20px;
+            font-size: 1.2rem;
+        }
+        .auth-box input {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .auth-box button {
+            width: 100%;
+            padding: 10px;
+            background-color: #0066cc;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .auth-box button:hover {
+            background-color: #004b99;
+        }
+        #error-msg {
+            color: #d9534f;
+            font-size: 0.85rem;
+            margin-top: 10px;
+            display: none;
+        }
+        #main-content {
+            display: none;
+        }
+        h1 {
+            font-size: 1.5rem;
+            border-bottom: 2px solid #ccc;
+            padding-bottom: 8px;
+            margin-bottom: 20px;
+        }
+        .item-card {
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 15px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        @media (min-width: 600px) {
+            .item-card {
+                flex-direction: row;
+                justify-content: space-between;
+                align-items: center;
+            }
+        }
+        .item-info { flex: 1; }
+        .item-title {
+            font-size: 1.1rem;
+            font-weight: bold;
+            color: #0066cc;
+            text-decoration: none;
+            display: inline-block;
+            margin-bottom: 5px;
+        }
+        .item-title:hover { text-decoration: underline; }
+        .item-meta {
+            font-size: 0.9rem;
+            color: #666;
+            display: flex;
+            gap: 15px;
+        }
+        .price { font-weight: bold; color: #d9534f; }
+        .cart-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center;
+        }
+        .cart-btn {
+            background-color: #f0ad4e;
+            color: #fff;
+            padding: 6px 12px;
+            border-radius: 4px;
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: bold;
+        }
+        .cart-btn:hover { background-color: #ec971f; }
+        .no-data { text-align: center; color: #888; padding: 40px; }
+    </style>
+</head>
+<body>
 
-if __name__ == "__main__":
-    main()
+    <!-- パスワード認証画面 -->
+    <div id="auth-screen">
+        <div class="auth-box">
+            <h2>認証が必要です</h2>
+            <input type="text" id="username" placeholder="ユーザー名 (ID)">
+            <input type="password" id="password" placeholder="パスワード">
+            <button onclick="checkAuth()">ログイン</button>
+            <div id="error-msg">IDまたはパスワードが違います</div>
+        </div>
+    </div>
+
+    <!-- メインコンテンツ -->
+    <div id="main-content">
+        <h1>プレミアムバンダイ 最新アイテム (Top 10)</h1>
+        <div id="item-container">
+            <div class="no-data">データを読み込んでいます...</div>
+        </div>
+    </div>
+
+    <script>
+        const CORRECT_USER = "gunpla";
+        const CORRECT_PASS = "gunplaAAA";
+
+        // グローバルスコープに定義してボタンから確実に呼び出せるようにする
+        window.checkAuth = function() {
+            const userInput = document.getElementById('username').value.trim();
+            const passInput = document.getElementById('password').value.trim();
+            const errorMsg = document.getElementById('error-msg');
+
+            if (userInput === CORRECT_USER && passInput === CORRECT_PASS) {
+                document.getElementById('auth-screen').style.display = 'none';
+                document.getElementById('main-content').style.display = 'block';
+                sessionStorage.setItem('isLoggedIn', 'true');
+                loadData();
+            } else {
+                if (errorMsg) {
+                    errorMsg.style.display = 'block';
+                }
+            }
+        };
+
+        window.onload = function() {
+            if (sessionStorage.getItem('isLoggedIn') === 'true') {
+                document.getElementById('auth-screen').style.display = 'none';
+                document.getElementById('main-content').style.display = 'block';
+                loadData();
+            }
+        };
+
+        async function loadData() {
+            const container = document.getElementById('item-container');
+            try {
+                // キャッシュを強制回避して常に最新の data.json を取得するパラメータ付き
+                const response = await fetch(`./data/data.json?t=${Date.now()}`);
+                if (!response.ok) throw new Error('データの取得に失敗しました。');
+                
+                const items = await response.json();
+                if (!items || items.length === 0) {
+                    container.innerHTML = '<div class="no-data">表示するデータがありません。</div>';
+                    return;
+                }
+
+                container.innerHTML = '';
+                items.slice(0, 10).forEach(item => {
+                    const card = document.createElement('div');
+                    card.className = 'item-card';
+
+                    const infoDiv = document.createElement('div');
+                    infoDiv.className = 'item-info';
+
+                    const titleLink = document.createElement('a');
+                    titleLink.className = 'item-title';
+                    titleLink.href = item.item_url || '#';
+                    titleLink.target = '_blank';
+                    titleLink.textContent = item.title || '名称不明';
+                    infoDiv.appendChild(titleLink);
+
+                    const metaDiv = document.createElement('div');
+                    metaDiv.className = 'item-meta';
+                    metaDiv.innerHTML = `<span class="price">${item.price || ''}</span><span>取得日時: ${item.date || ''}</span>`;
+                    infoDiv.appendChild(metaDiv);
+                    card.appendChild(infoDiv);
+
+                    const buttonsDiv = document.createElement('div');
+                    buttonsDiv.className = 'cart-buttons';
+
+                    const maxQty = item.max || 1;
+                    const orderNo = item.orderNo;
+
+                    if (orderNo) {
+                        for (let qty = 1; qty <= maxQty; qty++) {
+                            const cartObj = { [orderNo]: qty };
+                            const cartUrl = `https://p-bandai.jp/direct_cart_add?orderNos=${encodeURIComponent(JSON.stringify(cartObj))}`;
+
+                            const btn = document.createElement('a');
+                            btn.className = 'cart-btn';
+                            btn.href = cartUrl;
+                            btn.target = '_blank';
+                            btn.textContent = `${qty}個`;
+                            
+                            buttonsDiv.appendChild(btn);
+                        }
+                    } else {
+                        buttonsDiv.innerHTML = '<span style="font-size:0.85rem; color:#999;">注文番号なし</span>';
+                    }
+
+                    card.appendChild(buttonsDiv);
+                    container.appendChild(card);
+                });
+
+            } catch (error) {
+                console.error(error);
+                container.innerHTML = `<div class="no-data" style="color:red;">データの読み込みに失敗しました: ${error.message}</div>`;
+            }
+        }
+    </script>
+</body>
+</html>
