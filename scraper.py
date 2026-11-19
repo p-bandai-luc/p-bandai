@@ -58,64 +58,77 @@ def main():
                     if item_url:
                         print(f"[{index}/10] Processing: {clean_name}")
                         try:
-                            # キャッシュクリアとランダムウェイト
+                            # クッキークリア＆ランダムウェイト
                             context.clear_cookies()
                             sleep_sec = random.uniform(3.0, 5.0)
                             page.wait_for_timeout(int(sleep_sec * 1000))
 
-                            # XHR/レスポンスのHTMLを直接キャッチするための変数
-                            fetched_html = ""
-
-                            def handle_response(response):
-                                nonlocal fetched_html
-                                # 該当する商品URLへのリクエストかつステータス200のレスポンスをキャッチ
-                                if item_url in response.url and response.status == 200:
-                                    try:
-                                        text = response.text()
-                                        if "orderno_list" in text or "unit" in text:
-                                            fetched_html = text
-                                    except:
-                                        pass
-
-                            # レスポンスイベントリスナーを登録
-                            page.on("response", handle_response)
-
-                            # ページへ移動（これに伴うXHRレスポンスをキャッチする）
+                            # 詳細ページへ移動
                             page.goto(item_url, timeout=30000)
                             page.wait_for_timeout(3000)
 
-                            # リスナーを解除
-                            page.remove_listener("response", handle_response)
+                            # ページを少しスクロールして確実に描画させる
+                            page.evaluate("window.scrollBy(0, 400)")
+                            page.wait_for_timeout(1500)
 
-                            # もしXHRで取れなかった場合は現在のDOMのHTMLをフォールバックとして使用
-                            if not fetched_html:
-                                fetched_html = page.content()
+                            # ページ内のJavaScript変数やDOMから注文番号と最大数量を同時に安全抽出
+                            extracted = page.evaluate("""() => {
+                                let oNo = "";
+                                let mQty = 1;
 
-                            # --- 取得したHTML文字列から正規表現等で確実にデータを抽出 ---
-                            
-                            # 1. orderno_list の抽出 (例: "0000000000":"2753038000003")
-                            orderno_match = re.search(r'"0000000000"\s*:\s*"(\d+)"', fetched_html)
-                            if orderno_match:
-                                order_no = orderno_match.group(1)
+                                // 1. orderno_list から注文番号を取得
+                                try {
+                                    if (typeof orderno_list !== 'undefined') {
+                                        for (let key in orderno_list) {
+                                            let val = orderno_list[key];
+                                            if (typeof val === 'string' && val.length >= 7 && /^\d+$/.test(val)) {
+                                                oNo = val;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                } catch (e) {}
 
-                            # 2. 数量（#unit の option の value）の抽出
-                            # <select ... id="unit"...> から中の <option value="X"> をすべて探し出す
-                            unit_select_match = re.search(r'<select[^>]*id=["\']unit["\'][^>]*>(.*?)</select>', fetched_html, re.DOTALL)
-                            if unit_select_match:
-                                options_html = unit_select_match.group(1)
-                                option_values = re.findall(r'value=["\'](\d+)["\']', options_html)
-                                valid_qtys = [int(v) for v in option_values if int(v) > 0]
-                                if valid_qtys:
-                                    max_val = max(valid_qtys)
+                                // 2. ページ内の隠しinput等からもフォールバック検索
+                                if (!oNo) {
+                                    const inputs = document.querySelectorAll('input[name*="order"], input[type="hidden"]');
+                                    for (let input of inputs) {
+                                        let val = input.value;
+                                        if (val && val.length >= 7 && /^\d+$/.test(val)) {
+                                            oNo = val;
+                                            break;
+                                        }
+                                    }
+                                }
 
-                            # 3. フォールバック: ordermax_list からの抽出
-                            if max_val == 1:
-                                ordermax_match = re.search(r'ordermax_list\s*=\s*\{([^}]+)\}', fetched_html)
-                                if ordermax_match:
-                                    max_nums = re.findall(r':\s*(\d+)', ordermax_match.group(1))
-                                    valid_nums = [int(n) for n in max_nums if int(n) > 0]
-                                    if valid_nums:
-                                        max_val = max(valid_nums)
+                                // 3. #unit セレクトボックスから最大購入数を取得
+                                const select = document.querySelector('#unit');
+                                if (select) {
+                                    for (let option of select.options) {
+                                        const val = parseInt(option.value, 10);
+                                        if (!isNaN(val) && val > mQty) {
+                                            mQty = val;
+                                        }
+                                    }
+                                }
+
+                                // 4. ordermax_list からのフォールバック
+                                try {
+                                    if (typeof ordermax_list !== 'undefined') {
+                                        for (let key in ordermax_list) {
+                                            let val = parseInt(ordermax_list[key], 10);
+                                            if (!isNaN(val) && val > mQty) {
+                                                mQty = val;
+                                            }
+                                        }
+                                    }
+                                } catch (e) {}
+
+                                return { orderNo: oNo, max: mQty };
+                            }""")
+
+                            order_no = extracted.get("orderNo", "")
+                            max_val = extracted.get("max", 1)
 
                             print(f"  -> orderNo: {order_no}, max: {max_val}")
 
