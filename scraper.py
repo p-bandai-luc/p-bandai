@@ -7,10 +7,48 @@ from playwright.sync_api import sync_playwright
 
 TARGET_URL = "https://p-bandai.jp/chara/c0010/?q=&q2=&C1=c0010&C2=S0004%2CS0075&C3=&C4=&C5=&C6=&C7=&C8=&p=&c=60&sort=1&exact_dictionary_list=&page=1&search_on_flg=1&select_sc=&op_sf=0&op_cate=&op_cname=&op_ckana="
 
+# 個別ページ遷移後、判定するまでの待ち時間（秒）
+DETAIL_WAIT_SEC = 3.0
+
+def extract_detail_info(page):
+    """現在の詳細ページから orderNo と max を取得する"""
+    order_no = ""
+    max_val = 1
+
+    try:
+        order_no = page.evaluate("""() => {
+            if (typeof orderno_list !== 'undefined' && orderno_list) {
+                for (let k in orderno_list) {
+                    let v = orderno_list[k];
+                    if (typeof v === 'string' && v.length >= 7) return v;
+                }
+            }
+            return "";
+        }""") or ""
+    except Exception:
+        order_no = ""
+
+    try:
+        max_val = page.evaluate("""() => {
+            const sel = document.querySelector('#unit');
+            if (!sel) return 1;
+            let m = 1;
+            for (let opt of sel.options) {
+                let val = parseInt(opt.value, 10);
+                if (!isNaN(val) && val > m) m = val;
+            }
+            return m;
+        }""") or 1
+    except Exception:
+        max_val = 1
+
+    return order_no, max_val
+
 def main():
     scraped_data = []
     jst = timezone(timedelta(hours=+9), 'JST')
     now_str = datetime.now(jst).strftime('%Y-%m-%d %H:%M')
+    wait_ms = int(DETAIL_WAIT_SEC * 1000)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
@@ -37,7 +75,6 @@ def main():
             page.goto(TARGET_URL, timeout=60000)
             page.wait_for_timeout(5000)
 
-            # 一覧ページから ga_items を取得
             ga_items = page.evaluate("typeof ga_items !== 'undefined' ? ga_items : null")
             
             if ga_items and isinstance(ga_items, list):
@@ -58,52 +95,29 @@ def main():
                     if item_url:
                         print(f"[{index}/10] Processing: {clean_name}")
                         try:
-                            # 個別ページに行く前にクッキーをクリア
                             context.clear_cookies()
                             
                             sleep_sec = random.uniform(5.0, 8.0)
                             page.wait_for_timeout(int(sleep_sec * 1000))
 
-                            # 直接リンク先に移動
                             page.goto(item_url, timeout=30000)
-                            page.wait_for_timeout(3000)
 
-                            # 人間らしい動きを模倣
+                            # 指定した待ち時間後に判定
+                            page.wait_for_timeout(wait_ms)
                             page.evaluate("window.scrollBy(0, 400)")
-                            page.wait_for_timeout(1500)
+                            order_no, max_val = extract_detail_info(page)
 
-                            # 注文番号の取得（orderno_list を直接安全に評価）
-                            try:
-                                order_no = page.evaluate("""() => {
-                                    if (typeof orderno_list !== 'undefined') {
-                                        for (let k in orderno_list) {
-                                            let v = orderno_list[k];
-                                            if (typeof v === 'string' && v.length >= 7) return v;
-                                        }
-                                    }
-                                    return "";
-                                }""")
-                            except:
-                                order_no = ""
-
-                            # 最大購入数の取得（#unit セレクトボックスの走査）
-                            try:
-                                max_val = page.evaluate("""() => {
-                                    const sel = document.querySelector('#unit');
-                                    if (!sel) return 1;
-                                    let m = 1;
-                                    for (let opt of sel.options) {
-                                        let val = parseInt(opt.value, 10);
-                                        if (!isNaN(val) && val > m) m = val;
-                                    }
-                                    return m;
-                                }""")
-                            except:
-                                max_val = 1
+                            # もし orderNo が空なら、さらに少し待ってから再判定
+                            if not order_no:
+                                page.wait_for_timeout(wait_ms)
+                                order_no_retry, max_val_retry = extract_detail_info(page)
+                                if order_no_retry:
+                                    order_no = order_no_retry
+                                if max_val_retry > max_val:
+                                    max_val = max_val_retry
 
                             print(f"  -> orderNo: {order_no}, max: {max_val}")
 
-                            # 次のループのために一覧ページへ戻る
                             page.goto(TARGET_URL, timeout=30000)
                             page.wait_for_timeout(3000)
 
