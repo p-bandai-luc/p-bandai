@@ -75,11 +75,6 @@ def main():
                             page.evaluate("window.scrollBy(0, 400)")
                             page.wait_for_timeout(1500)
 
-                            # orderno_list 取得
-                            orderno_list = page.evaluate("typeof orderno_list !== 'undefined' ? orderno_list : null")
-                            if orderno_list and isinstance(orderno_list, dict):
-                                order_no = orderno_list.get("0000000000", "")
-
                             # セレクトボックス（#unit）から最大購入数を正確に抽出（堅牢化版）
                             try:
                                 page.wait_for_selector("#unit", timeout=3000)
@@ -99,6 +94,11 @@ def main():
                                 }
                                 return maxQty;
                             }""")
+
+                            # orderno_list 取得
+                            orderno_list = page.evaluate("typeof orderno_list !== 'undefined' ? orderno_list : null")
+                            if orderno_list and isinstance(orderno_list, dict):
+                                order_no = orderno_list.get("0000000000", "")
 
                             # 次のループのために一覧ページへ戻る
                             page.goto(TARGET_URL, timeout=30000)
