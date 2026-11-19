@@ -69,7 +69,7 @@ def main():
 
                             # ★ 新しいタブを開かず、既存のページで直接リンク先に移動する
                             page.goto(item_url, timeout=30000)
-                            page.wait_for_timeout(3000)
+                            page.wait_for_timeout(10000)
 
                             # 人間らしい動きを模倣
                             page.evaluate("window.scrollBy(0, 400)")
