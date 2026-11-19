@@ -30,7 +30,6 @@ def main():
         )
         context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
-        # 1つのタブ（ページ）だけで最初から最後まで処理する
         page = context.new_page()
         
         try:
@@ -38,7 +37,7 @@ def main():
             page.goto(TARGET_URL, timeout=60000)
             page.wait_for_timeout(5000)
 
-            # 一覧ページから ga_items を取得（ここはご提示いただいた動いている構成をそのまま維持）
+            # 一覧ページから ga_items を取得
             ga_items = page.evaluate("typeof ga_items !== 'undefined' ? ga_items : null")
             
             if ga_items and isinstance(ga_items, list):
@@ -59,87 +58,48 @@ def main():
                     if item_url:
                         print(f"[{index}/10] Processing: {clean_name}")
                         try:
-                            # 個別ページに行く前にキャッシュやクッキーをクリアして綺麗にする
+                            # 個別ページに行く前にクッキーをクリア
                             context.clear_cookies()
                             
-                            # ランダムなウェート
                             sleep_sec = random.uniform(5.0, 8.0)
                             page.wait_for_timeout(int(sleep_sec * 1000))
 
                             # 直接リンク先に移動
                             page.goto(item_url, timeout=30000)
-                            
-                            # 詳細ページのJSやDOM要素が完全に描画されるのを少し待つ
-                            try:
-                                page.wait_for_function(
-                                    "() => (typeof orderno_list !== 'undefined') || document.querySelector('#unit') !== null",
-                                    timeout=8000
-                                )
-                            except:
-                                pass
+                            page.wait_for_timeout(3000)
 
                             # 人間らしい動きを模倣
                             page.evaluate("window.scrollBy(0, 400)")
                             page.wait_for_timeout(1500)
 
-                            # ★【個別部分の強化】JS変数とDOMの両方から orderNo と max を確実に抽出
-                            extracted = page.evaluate(r"""() => {
-                                let oNo = "";
-                                let mQty = 1;
-
-                                // 1. orderno_list の中からキー名に関わらず7桁以上の有効な数値を探索
-                                try {
+                            # 注文番号の取得（orderno_list を直接安全に評価）
+                            try:
+                                order_no = page.evaluate("""() => {
                                     if (typeof orderno_list !== 'undefined') {
-                                        for (let key in orderno_list) {
-                                            let val = orderno_list[key];
-                                            if (typeof val === 'string' && val.length >= 7 && /^\d+$/.test(val)) {
-                                                oNo = val;
-                                                break;
-                                            }
+                                        for (let k in orderno_list) {
+                                            let v = orderno_list[k];
+                                            if (typeof v === 'string' && v.length >= 7) return v;
                                         }
                                     }
-                                } catch (e) {}
+                                    return "";
+                                }""")
+                            except:
+                                order_no = ""
 
-                                // 2. 見つからない場合はDOM内の隠しinput等からもフォールバック検索
-                                if (!oNo) {
-                                    const inputs = document.querySelectorAll('input[name*="order"], input[type="hidden"]');
-                                    for (let input of inputs) {
-                                        let val = input.value;
-                                        if (val && val.length >= 7 && /^\d+$/.test(val)) {
-                                            oNo = val;
-                                            break;
-                                        }
+                            # 最大購入数の取得（#unit セレクトボックスの走査）
+                            try:
+                                max_val = page.evaluate("""() => {
+                                    const sel = document.querySelector('#unit');
+                                    if (!sel) return 1;
+                                    let m = 1;
+                                    for (let opt of sel.options) {
+                                        let val = parseInt(opt.value, 10);
+                                        if (!isNaN(val) && val > m) m = val;
                                     }
-                                }
-
-                                // 3. #unit セレクトボックスのオプションから最大購入数を正確に抽出
-                                const select = document.querySelector('#unit');
-                                if (select) {
-                                    for (let option of select.options) {
-                                        const val = parseInt(option.value, 10);
-                                        if (!isNaN(val) && val > mQty) {
-                                            mQty = val;
-                                        }
-                                    }
-                                }
-
-                                // 4. ordermax_list からのフォールバック
-                                try {
-                                    if (typeof ordermax_list !== 'undefined') {
-                                        for (let key in ordermax_list) {
-                                            let val = parseInt(ordermax_list[key], 10);
-                                            if (!isNaN(val) && val > mQty) {
-                                                mQty = val;
-                                            }
-                                        }
-                                    }
-                                } catch (e) {}
-
-                                return { orderNo: oNo, max: mQty };
-                            """)
-
-                            order_no = extracted.get("orderNo", "")
-                            max_val = extracted.get("max", 1)
+                                    return m;
+                                }""")
+                            except:
+                                max_val = 1
 
                             print(f"  -> orderNo: {order_no}, max: {max_val}")
 
@@ -149,7 +109,6 @@ def main():
 
                         except Exception as e:
                             print(f"  Error fetching detail page: {e}")
-                            # エラーが起きた場合も一覧ページに戻して復帰を試みる
                             try:
                                 page.goto(TARGET_URL, timeout=30000)
                             except:
