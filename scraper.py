@@ -6,6 +6,22 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 TARGET_URL = "https://p-bandai.jp/chara/c0010/?q=&q2=&C1=c0010&C2=S0004%2CS0075&C3=&C4=&C5=&C6=&C7=&C8=&p=&c=60&sort=1&exact_dictionary_list=&page=1&search_on_flg=1&select_sc=&op_sf=0&op_cate=&op_cname=&op_ckana="
+MAX_ORDER_RETRIES = 3
+
+def get_order_no_and_max(page):
+    order_no = ""
+    max_val = None
+
+    orderno_list = page.evaluate("typeof orderno_list !== 'undefined' ? orderno_list : null")
+    if orderno_list and isinstance(orderno_list, dict):
+        order_no = orderno_list.get("0000000000", "") or ""
+
+    options = page.eval_on_selector_all("#unit option", "elements => elements.map(e => e.value)")
+    valid_qtys = [int(val) for val in options if val.isdigit() and int(val) > 0]
+    if valid_qtys:
+        max_val = max(valid_qtys)
+
+    return order_no, max_val
 
 def main():
     scraped_data = []
@@ -75,16 +91,24 @@ def main():
                             page.evaluate("window.scrollBy(0, 400)")
                             page.wait_for_timeout(1500)
 
-                            # orderno_list 取得
-                            orderno_list = page.evaluate("typeof orderno_list !== 'undefined' ? orderno_list : null")
-                            if orderno_list and isinstance(orderno_list, dict):
-                                order_no = orderno_list.get("0000000000", "")
+                            order_no, detected_max = get_order_no_and_max(page)
+                            if detected_max is not None:
+                                max_val = detected_max
 
-                            # セレクトボックス取得
-                            options = page.eval_on_selector_all("#unit option", "elements => elements.map(e => e.value)")
-                            valid_qtys = [int(val) for val in options if val.isdigit() and int(val) > 0]
-                            if valid_qtys:
-                                max_val = max(valid_qtys)
+                            # orderno が取れなかった場合、最大3回までリトライ
+                            for retry in range(1, MAX_ORDER_RETRIES + 1):
+                                if order_no:
+                                    break
+                                print(f"  orderno empty. Retry {retry}/{MAX_ORDER_RETRIES}...")
+                                page.wait_for_timeout(3000)
+                                page.evaluate("window.scrollBy(0, 200)")
+                                page.wait_for_timeout(1000)
+
+                                retry_order_no, retry_max = get_order_no_and_max(page)
+                                if retry_order_no:
+                                    order_no = retry_order_no
+                                if retry_max is not None and retry_max > max_val:
+                                    max_val = retry_max
 
                             print(f"orderno:{order_no} max:{max_val}")
 
