@@ -30,7 +30,6 @@ def main():
         )
         context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
-        # 1つのタブ（ページ）だけで最初から最後まで処理する
         page = context.new_page()
         
         try:
@@ -59,73 +58,73 @@ def main():
                     if item_url:
                         print(f"[{index}/10] Processing: {clean_name}")
                         try:
-                            # 個別ページに行く前にキャッシュやクッキーをクリアして綺麗にする
+                            # キャッシュクリアとランダムウェイト
                             context.clear_cookies()
-                            
-                            # ランダムなウェート
-                            sleep_sec = random.uniform(5.0, 8.0)
-                            print(f"  Waiting {sleep_sec:.1f}s...")
+                            sleep_sec = random.uniform(3.0, 5.0)
                             page.wait_for_timeout(int(sleep_sec * 1000))
 
-                            # 新しいタブを開かず、既存のページで直接リンク先に移動する
+                            # XHR/レスポンスのHTMLを直接キャッチするための変数
+                            fetched_html = ""
+
+                            def handle_response(response):
+                                nonlocal fetched_html
+                                # 該当する商品URLへのリクエストかつステータス200のレスポンスをキャッチ
+                                if item_url in response.url and response.status == 200:
+                                    try:
+                                        text = response.text()
+                                        if "orderno_list" in text or "unit" in text:
+                                            fetched_html = text
+                                    except:
+                                        pass
+
+                            # レスポンスイベントリスナーを登録
+                            page.on("response", handle_response)
+
+                            # ページへ移動（これに伴うXHRレスポンスをキャッチする）
                             page.goto(item_url, timeout=30000)
                             page.wait_for_timeout(3000)
 
-                            # 人間らしい動きを模倣
-                            page.evaluate("window.scrollBy(0, 400)")
-                            page.wait_for_timeout(1500)
+                            # リスナーを解除
+                            page.remove_listener("response", handle_response)
 
-                            # セレクトボックス（#unit）の待機とタイムアウト判定
-                            try:
-                                page.wait_for_selector("#unit", timeout=10000)
-                                print("  -> #unit selector found.")
-                            except Exception as timeout_err:
-                                print(f"  -> [警告] #unit の待機がタイムアウトしました（在庫なし・別レイアウト等の可能性）: {timeout_err}")
+                            # もしXHRで取れなかった場合は現在のDOMのHTMLをフォールバックとして使用
+                            if not fetched_html:
+                                fetched_html = page.content()
 
-                            # 最大購入数の抽出（#unit および ordermax_list などのJS変数もフォールバックとして併用）
-                            max_val = page.evaluate("""() => {
-                                let maxQty = 1;
-
-                                // 1. #unit セレクトボックスから取得
-                                const select = document.querySelector('#unit');
-                                if (select) {
-                                    for (let option of select.options) {
-                                        const val = parseInt(option.value, 10);
-                                        if (!isNaN(val) && val > maxQty) {
-                                            maxQty = val;
-                                        }
-                                    }
-                                }
-
-                                // 2. もしセレクトから取れなかった場合、プレバンのJS変数 ordermax_list を確認
-                                try {
-                                    if (typeof ordermax_list !== 'undefined') {
-                                        for (let key in ordermax_list) {
-                                            let val = parseInt(ordermax_list[key], 10);
-                                            if (!isNaN(val) && val > maxQty) {
-                                                maxQty = val;
-                                            }
-                                        }
-                                    }
-                                } catch (e) {}
-
-                                return maxQty;
-                            }""")
+                            # --- 取得したHTML文字列から正規表現等で確実にデータを抽出 ---
                             
-                            print(f"  -> Detected max quantity: {max_val}")
+                            # 1. orderno_list の抽出 (例: "0000000000":"2753038000003")
+                            orderno_match = re.search(r'"0000000000"\s*:\s*"(\d+)"', fetched_html)
+                            if orderno_match:
+                                order_no = orderno_match.group(1)
 
-                            # orderno_list 取得
-                            orderno_list = page.evaluate("typeof orderno_list !== 'undefined' ? orderno_list : null")
-                            if orderno_list and isinstance(orderno_list, dict):
-                                order_no = orderno_list.get("0000000000", "")
+                            # 2. 数量（#unit の option の value）の抽出
+                            # <select ... id="unit"...> から中の <option value="X"> をすべて探し出す
+                            unit_select_match = re.search(r'<select[^>]*id=["\']unit["\'][^>]*>(.*?)</select>', fetched_html, re.DOTALL)
+                            if unit_select_match:
+                                options_html = unit_select_match.group(1)
+                                option_values = re.findall(r'value=["\'](\d+)["\']', options_html)
+                                valid_qtys = [int(v) for v in option_values if int(v) > 0]
+                                if valid_qtys:
+                                    max_val = max(valid_qtys)
+
+                            # 3. フォールバック: ordermax_list からの抽出
+                            if max_val == 1:
+                                ordermax_match = re.search(r'ordermax_list\s*=\s*\{([^}]+)\}', fetched_html)
+                                if ordermax_match:
+                                    max_nums = re.findall(r':\s*(\d+)', ordermax_match.group(1))
+                                    valid_nums = [int(n) for n in max_nums if int(n) > 0]
+                                    if valid_nums:
+                                        max_val = max(valid_nums)
+
+                            print(f"  -> orderNo: {order_no}, max: {max_val}")
 
                             # 次のループのために一覧ページへ戻る
                             page.goto(TARGET_URL, timeout=30000)
-                            page.wait_for_timeout(3000)
+                            page.wait_for_timeout(2000)
 
                         except Exception as e:
                             print(f"  Error fetching detail page: {e}")
-                            # エラーが起きた場合も一覧ページに戻して復帰を試みる
                             try:
                                 page.goto(TARGET_URL, timeout=30000)
                             except:
