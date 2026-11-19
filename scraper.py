@@ -77,7 +77,7 @@ def main():
 
                             # セレクトボックス（#unit）から最大購入数を正確に抽出（堅牢化版）
                             try:
-                                page.wait_for_selector("#unit", timeout=3000)
+                                page.wait_for_selector("#unit", timeout=20000)
                             except:
                                 pass # #unit が無いページ（在庫なし等）の場合はスルー
 
