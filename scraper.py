@@ -86,6 +86,8 @@ def main():
                             if valid_qtys:
                                 max_val = max(valid_qtys)
 
+                            print(f"orderno:{order_no:f} max:{max_val:f}")
+
                             # 次のループのために一覧ページへ戻る
                             page.goto(TARGET_URL, timeout=30000)
                             page.wait_for_timeout(3000)
