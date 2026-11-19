@@ -75,25 +75,44 @@ def main():
                             page.evaluate("window.scrollBy(0, 400)")
                             page.wait_for_timeout(1500)
 
-                            # セレクトボックス（#unit）から最大購入数を正確に抽出（堅牢化版）
+                            # セレクトボックス（#unit）の待機とタイムアウト判定
                             try:
-                                page.wait_for_selector("#unit", timeout=20000)
-                            except:
-                                pass # #unit が無いページ（在庫なし等）の場合はスルー
+                                page.wait_for_selector("#unit", timeout=10000)
+                                print("  -> #unit selector found.")
+                            except Exception as timeout_err:
+                                print(f"  -> [警告] #unit の待機がタイムアウトしました（在庫なし・別レイアウト等の可能性）: {timeout_err}")
 
+                            # 最大購入数の抽出（#unit および ordermax_list などのJS変数もフォールバックとして併用）
                             max_val = page.evaluate("""() => {
-                                const select = document.querySelector('#unit');
-                                if (!select) return 1;
-
                                 let maxQty = 1;
-                                for (let option of select.options) {
-                                    const val = parseInt(option.value, 10);
-                                    if (!isNaN(val) && val > maxQty) {
-                                        maxQty = val;
+
+                                // 1. #unit セレクトボックスから取得
+                                const select = document.querySelector('#unit');
+                                if (select) {
+                                    for (let option of select.options) {
+                                        const val = parseInt(option.value, 10);
+                                        if (!isNaN(val) && val > maxQty) {
+                                            maxQty = val;
+                                        }
                                     }
                                 }
+
+                                // 2. もしセレクトから取れなかった場合、プレバンのJS変数 ordermax_list を確認
+                                try {
+                                    if (typeof ordermax_list !== 'undefined') {
+                                        for (let key in ordermax_list) {
+                                            let val = parseInt(ordermax_list[key], 10);
+                                            if (!isNaN(val) && val > maxQty) {
+                                                maxQty = val;
+                                            }
+                                        }
+                                    }
+                                } catch (e) {}
+
                                 return maxQty;
                             }""")
+                            
+                            print(f"  -> Detected max quantity: {max_val}")
 
                             # orderno_list 取得
                             orderno_list = page.evaluate("typeof orderno_list !== 'undefined' ? orderno_list : null")
